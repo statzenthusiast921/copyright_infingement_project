@@ -1,0 +1,4 @@
+dash>=1.6.1
+scikit-image
+Pillow
+scikit-learn
