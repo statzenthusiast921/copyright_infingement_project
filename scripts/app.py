@@ -3,10 +3,8 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 from dash_canvas import DashCanvas
 import os
-import base64
 import numpy as np
 from PIL import Image, ImageDraw
-from io import BytesIO
 from skimage.metrics import structural_similarity as ssim
 import json
 
@@ -34,7 +32,29 @@ CANVAS_HEIGHT = 400
 # Layout
 app.layout = html.Div([
     html.H1("Copyright", style={'textAlign': 'center'}),
-
+    
+    # Button above instructions container
+    html.Div([
+        html.Button("Compare Images", id='compare-button', n_clicks=0, style={'marginBottom': '10px'}),
+        html.Div(
+            id='similarity-score',
+            style={
+                'fontSize': '18px',
+                'fontWeight': 'bold',
+                'color': '#0074D9',
+                'minWidth': '350px',
+                'textAlign': 'center',
+                'lineHeight': '1.4'
+            },
+            children=(
+                "Draw your image on the left canvas. "
+                "Select a logo on the right. "
+                "When ready, click 'Compare Images' to get a similarity score "
+                "from 0 (no match) to 100 (perfect match)."
+            )
+        )
+    ], style={'textAlign': 'center', 'marginBottom': '20px'}),
+    
     html.Div([
         # Drawing Panel
         html.Div([
@@ -83,19 +103,19 @@ app.layout = html.Div([
                 clearable=False
             ),
             html.Br(),
-            html.Img(id='team-logo-img', style={
-                'width': f"{CANVAS_WIDTH}px",
-                'height': f"{CANVAS_HEIGHT}px",
-                'border': '1px solid black'
-            }),
-            html.Br(),
-            html.Button("Compare Images", id='compare-button', n_clicks=0),
-            html.Div(id='comparison-result', style={'marginTop': '20px', 'fontWeight': 'bold'})
+            html.Img(
+                id='team-logo-img',
+                style={
+                    'width': f"{CANVAS_WIDTH}px",
+                    'height': f"{CANVAS_HEIGHT}px",
+                    'border': '1px solid black'
+                }
+            ),
         ], style={'flex': '1', 'padding': '20px'})
-    ], style={'display': 'flex'})
+    ], style={'display': 'flex', 'justifyContent': 'center', 'alignItems': 'start'})
 ])
 
-# Callbacks
+# Callbacks to update brush color and size
 @app.callback(
     Output('drawing-canvas', 'lineColor'),
     Input('color-dropdown', 'value')
@@ -110,6 +130,7 @@ def update_color(color):
 def update_brush_size(size):
     return size
 
+# Update logo image
 @app.callback(
     Output('team-logo-img', 'src'),
     Input('team-logo-dropdown', 'value')
@@ -139,27 +160,36 @@ def parse_json_to_image(json_data, width, height):
                         continue  # skip malformed lines
     return image
 
-# Helper to compute similarity
+# Helper to compute similarity (scaled 0-100)
 def calculate_similarity(img1, img2):
     img1 = img1.resize((300, 200)).convert("L")
     img2 = img2.resize((300, 200)).convert("L")
     arr1 = np.array(img1)
     arr2 = np.array(img2)
     similarity, _ = ssim(arr1, arr2, full=True)
-    return similarity
+    # Scale similarity from -1..1 range to 0..100 percent
+    similarity_percent = max(0, (similarity + 1) / 2) * 100
+    return similarity_percent
 
-# Callback for image comparison
+# Compare images callback
 @app.callback(
-    Output('comparison-result', 'children'),
+    Output('similarity-score', 'children'),
     Input('compare-button', 'n_clicks'),
-    Input('drawing-canvas', 'json_data'),  # keep this as Input so we always get latest
+    State('drawing-canvas', 'json_data'),
     State('team-logo-dropdown', 'value')
 )
 def compare_images(n_clicks, json_data, logo_filename):
-    if not n_clicks or not json_data or not logo_filename:
-        return ""
+    if not n_clicks:
+        return (
+            "Draw your image on the left canvas. "
+            "Select a logo on the right. "
+            "When ready, click 'Compare Images' to get a similarity score "
+            "from 0 (no match) to 100 (perfect match)."
+        )
 
-    import json
+    if not json_data or not logo_filename:
+        return "Please draw something and select a logo first."
+
     try:
         parsed_json = json.loads(json_data)
         drawing_img = parse_json_to_image(parsed_json, CANVAS_WIDTH, CANVAS_HEIGHT)
@@ -167,8 +197,9 @@ def compare_images(n_clicks, json_data, logo_filename):
         logo_path = os.path.join(LOGO_FOLDER, logo_filename)
         logo_img = Image.open(logo_path)
 
-        similarity = calculate_similarity(drawing_img, logo_img)
-        return f"Similarity Score: {similarity:.2f}"
+        similarity_percent = calculate_similarity(drawing_img, logo_img)
+
+        return f"Similarity Score: {similarity_percent:.1f} / 100"
 
     except Exception as e:
         return f"Error comparing images: {str(e)}"
